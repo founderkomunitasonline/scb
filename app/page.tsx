@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
 
+// Type definitions
 interface DepositRecord {
   'User Name': string;
   'Deposit': number | string;
@@ -29,46 +29,39 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
-  const readFile = (file: File): Promise<any[]> => {
+  const readExcelFile = (file: File): Promise<any[]> => {
     return new Promise((resolve, reject) => {
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      
-      if (extension === 'xlsx' || extension === 'xls') {
-        const reader = new FileReader();
-        reader.onload = (e) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet);
           resolve(jsonData);
-        };
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
-      } else if (extension === 'csv') {
-        Papa.parse(file, {
-          header: true,
-          complete: (results) => {
-            resolve(results.data);
-          },
-          error: reject
-        });
-      } else {
-        reject(new Error('Format file tidak didukung. Gunakan .xlsx, .xls, atau .csv'));
-      }
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
     });
   };
 
   const extractDate = (datetime: string): string => {
     if (!datetime) return '';
+    // Try to extract date in YYYY-MM-DD format
     const dateMatch = datetime.match(/\d{4}-\d{2}-\d{2}/);
     if (dateMatch) return dateMatch[0];
     
+    // Try to parse as Date object
     const date = new Date(datetime);
     if (!isNaN(date.getTime())) {
       return date.toISOString().split('T')[0];
     }
     
+    // If all fails, return as is
     return datetime.split(' ')[0];
   };
 
@@ -77,6 +70,7 @@ export default function Home() {
     setError('');
     
     try {
+      // Create a Set of users who already got bonus
       const bonusSet = new Set<string>();
       
       manualData.forEach(record => {
@@ -91,6 +85,7 @@ export default function Home() {
         }
       });
       
+      // Filter QRPay data
       const filtered = qrpayData.filter(record => {
         const userName = record['User Name']?.toString().trim();
         const date = extractDate(record['Date/Time']?.toString() || '');
@@ -119,7 +114,15 @@ export default function Home() {
       return;
     }
     
-    const worksheet = XLSX.utils.json_to_sheet(filteredData);
+    // Prepare data for export
+    const exportData = filteredData.map(record => ({
+      'User Name': record['User Name'],
+      'Deposit': record['Deposit'],
+      'Date/Time': record['Date/Time'],
+      'Reference': record['Reference'] || '-'
+    }));
+    
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Belum Dapat Bonus');
     
@@ -133,7 +136,7 @@ export default function Home() {
     
     try {
       setLoading(true);
-      const data = await readFile(file);
+      const data = await readExcelFile(file);
       setManualData(data);
       setError('');
     } catch (err) {
@@ -149,7 +152,7 @@ export default function Home() {
     
     try {
       setLoading(true);
-      const data = await readFile(file);
+      const data = await readExcelFile(file);
       setQrpayData(data);
       setError('');
     } catch (err) {
@@ -160,78 +163,84 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-8">
+    <div className="min-h-screen p-8" style={{ background: '#f5f5f5' }}>
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-2 text-gray-800">
+        <h1 className="text-3xl font-bold mb-2" style={{ color: '#1f2937' }}>
           Filter Deposit - Bonus Harian
         </h1>
-        <p className="text-gray-600 mb-8">
+        <p className="mb-8" style={{ color: '#4b5563' }}>
           Menampilkan user dari QRPay yang belum mendapatkan bonus deposit harian
         </p>
         
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="mb-4 p-4 rounded" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#dc2626' }}>
             {error}
           </div>
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Manual Deposit Upload */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800">
+          <div className="rounded-lg shadow-md p-6" style={{ background: '#ffffff' }}>
+            <h2 className="text-xl font-semibold mb-4" style={{ color: '#1f2937' }}>
               1. Deposit History (Manual)
             </h2>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+            <div className="border-2 border-dashed rounded-lg p-6 text-center" style={{ borderColor: '#d1d5db' }}>
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls"
                 onChange={handleManualUpload}
                 className="hidden"
                 id="manual-upload"
               />
               <label
                 htmlFor="manual-upload"
-                className="cursor-pointer inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                className="cursor-pointer inline-block px-4 py-2 rounded transition"
+                style={{ background: '#2563eb', color: '#ffffff' }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
               >
                 Upload File Manual
               </label>
               {manualData.length > 0 && (
-                <p className="mt-3 text-green-600">
+                <p className="mt-3" style={{ color: '#16a34a' }}>
                   ✓ {manualData.length} data terupload
                 </p>
               )}
-              <p className="text-sm text-gray-500 mt-2">
-                Format: .xlsx, .xls, .csv
+              <p className="text-sm mt-2" style={{ color: '#6b7280' }}>
+                Format: .xlsx, .xls
               </p>
             </div>
           </div>
           
           {/* QRPay Upload */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800">
+          <div className="rounded-lg shadow-md p-6" style={{ background: '#ffffff' }}>
+            <h2 className="text-xl font-semibold mb-4" style={{ color: '#1f2937' }}>
               2. Deposit History (QRPay)
             </h2>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+            <div className="border-2 border-dashed rounded-lg p-6 text-center" style={{ borderColor: '#d1d5db' }}>
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls"
                 onChange={handleQRPayUpload}
                 className="hidden"
                 id="qrpay-upload"
               />
               <label
                 htmlFor="qrpay-upload"
-                className="cursor-pointer inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                className="cursor-pointer inline-block px-4 py-2 rounded transition"
+                style={{ background: '#2563eb', color: '#ffffff' }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
               >
                 Upload File QRPay
               </label>
               {qrpayData.length > 0 && (
-                <p className="mt-3 text-green-600">
+                <p className="mt-3" style={{ color: '#16a34a' }}>
                   ✓ {qrpayData.length} data terupload
                 </p>
               )}
-              <p className="text-sm text-gray-500 mt-2">
-                Format: .xlsx, .xls, .csv
+              <p className="text-sm mt-2" style={{ color: '#6b7280' }}>
+                Format: .xlsx, .xls
               </p>
             </div>
           </div>
@@ -242,11 +251,22 @@ export default function Home() {
           <button
             onClick={filterDeposits}
             disabled={loading || manualData.length === 0 || qrpayData.length === 0}
-            className={`px-6 py-2 rounded font-semibold ${
-              loading || manualData.length === 0 || qrpayData.length === 0
-                ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-700 text-white'
-            }`}
+            className="px-6 py-2 rounded font-semibold"
+            style={{
+              background: loading || manualData.length === 0 || qrpayData.length === 0 ? '#9ca3af' : '#16a34a',
+              color: '#ffffff',
+              cursor: loading || manualData.length === 0 || qrpayData.length === 0 ? 'not-allowed' : 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              if (!(loading || manualData.length === 0 || qrpayData.length === 0)) {
+                e.currentTarget.style.background = '#15803d';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!(loading || manualData.length === 0 || qrpayData.length === 0)) {
+                e.currentTarget.style.background = '#16a34a';
+              }
+            }}
           >
             {loading ? 'Memproses...' : 'Filter Data'}
           </button>
@@ -254,7 +274,10 @@ export default function Home() {
           {filteredData.length > 0 && (
             <button
               onClick={downloadExcel}
-              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-semibold"
+              className="px-6 py-2 rounded font-semibold"
+              style={{ background: '#4f46e5', color: '#ffffff' }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#4338ca'}
+              onMouseLeave={(e) => e.currentTarget.style.background = '#4f46e5'}
             >
               Download Excel
             </button>
@@ -263,45 +286,45 @@ export default function Home() {
         
         {/* Results Table */}
         {filteredData.length > 0 && (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="px-6 py-4 bg-gray-50 border-b">
-              <h3 className="text-lg font-semibold text-gray-800">
+          <div className="rounded-lg shadow-md overflow-hidden" style={{ background: '#ffffff' }}>
+            <div className="px-6 py-4 border-b" style={{ background: '#f9fafb', borderColor: '#e5e7eb' }}>
+              <h3 className="text-lg font-semibold" style={{ color: '#1f2937' }}>
                 Hasil Filter: {filteredData.length} user belum dapat bonus
               </h3>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+              <table className="min-w-full">
+                <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
                       User Name
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
                       Deposit
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
                       Date/Time
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
                       Reference
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="divide-y" style={{ divideColor: '#e5e7eb' }}>
                   {filteredData.map((record, idx) => (
                     <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
                         {record['User Name']}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
                         {typeof record['Deposit'] === 'number' 
                           ? `Rp ${record['Deposit'].toLocaleString('id-ID')}`
                           : record['Deposit']}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
                         {record['Date/Time']}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
                         {record['Reference'] || '-'}
                       </td>
                     </tr>
@@ -313,16 +336,16 @@ export default function Home() {
         )}
         
         {/* Info Panel */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-semibold text-blue-800 mb-2">Informasi Filter:</h4>
-          <ul className="text-sm text-blue-700 space-y-1">
+        <div className="mt-8 p-4 rounded-lg" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+          <h4 className="font-semibold mb-2" style={{ color: '#1e40af' }}>Informasi Filter:</h4>
+          <ul className="text-sm space-y-1" style={{ color: '#1e3a8a' }}>
             <li>• Data Manual dengan kolom "To Bank" mengandung "BONUS DEPOSIT HARIAN" dianggap sudah mendapatkan bonus</li>
             <li>• Perbandingan dilakukan berdasarkan User Name dan Tanggal yang sama</li>
             <li>• Hanya menampilkan data QRPay yang belum mendapatkan bonus di tanggal yang sama</li>
-            <li>• Mendukung file Excel (.xlsx, .xls) dan CSV</li>
+            <li>• Mendukung file Excel (.xlsx, .xls)</li>
           </ul>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
