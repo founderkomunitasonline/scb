@@ -1,17 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 
-// Type definitions
-interface DepositRecord {
-  'User Name': string;
-  'Deposit': number | string;
-  'Date/Time': string;
-  'Reference'?: string;
-  [key: string]: any;
-}
-
+// Types
 interface ManualRecord {
   'User Name': string;
   'From Bank': string;
@@ -19,16 +11,35 @@ interface ManualRecord {
   'Deposit': number | string;
   'Date/Time': string;
   'Edited By': string;
-  [key: string]: any;
+}
+
+interface QRPayRecord {
+  'User Name': string;
+  'Deposit': number | string;
+  'Date/Time': string;
+  'Reference'?: string;
+}
+
+interface FilteredRecord {
+  'User Name': string;
+  'Deposit': number | string;
+  'Date/Time': string;
+  'Reference': string;
+  'Status': string;
 }
 
 export default function Home() {
+  // State Management
   const [manualData, setManualData] = useState<ManualRecord[]>([]);
-  const [qrpayData, setQrpayData] = useState<DepositRecord[]>([]);
-  const [filteredData, setFilteredData] = useState<DepositRecord[]>([]);
+  const [qrpayData, setQrpayData] = useState<QRPayRecord[]>([]);
+  const [filteredData, setFilteredData] = useState<FilteredRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<string>('');
+  const [manualFileName, setManualFileName] = useState<string>('');
+  const [qrpayFileName, setQrpayFileName] = useState<string>('');
 
+  // Read Excel File
   const readExcelFile = (file: File): Promise<any[]> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -49,57 +60,111 @@ export default function Home() {
     });
   };
 
+  // Extract Date from DateTime string
   const extractDate = (datetime: string): string => {
     if (!datetime) return '';
-    // Try to extract date in YYYY-MM-DD format
+    
+    // Handle various date formats
     const dateMatch = datetime.match(/\d{4}-\d{2}-\d{2}/);
     if (dateMatch) return dateMatch[0];
     
-    // Try to parse as Date object
     const date = new Date(datetime);
     if (!isNaN(date.getTime())) {
       return date.toISOString().split('T')[0];
     }
     
-    // If all fails, return as is
     return datetime.split(' ')[0];
   };
 
+  // Handle Manual File Upload
+  const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setLoading(true);
+    setError('');
+    setManualFileName(file.name);
+    
+    try {
+      const data = await readExcelFile(file);
+      setManualData(data);
+      setSuccess(`Berhasil upload ${data.length} data manual`);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError('Error membaca file manual: ' + (err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle QRPay File Upload
+  const handleQRPayUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setLoading(true);
+    setError('');
+    setQrpayFileName(file.name);
+    
+    try {
+      const data = await readExcelFile(file);
+      setQrpayData(data);
+      setSuccess(`Berhasil upload ${data.length} data QRPay`);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError('Error membaca file QRPay: ' + (err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter Deposits
   const filterDeposits = () => {
     setLoading(true);
     setError('');
     
     try {
-      // Create a Set of users who already got bonus
+      // Create Set of users who already got bonus from manual data
       const bonusSet = new Set<string>();
       
       manualData.forEach(record => {
         const toBank = record['To Bank']?.toString() || '';
-        if (toBank.includes('BONUS DEPOSIT HARIAN')) {
+        if (toBank.toUpperCase().includes('BONUS DEPOSIT HARIAN')) {
           const userName = record['User Name']?.toString().trim();
           const date = extractDate(record['Date/Time']?.toString() || '');
           
           if (userName && date) {
-            bonusSet.add(`${userName}|${date}`);
+            bonusSet.add(`${userName.toLowerCase()}|${date}`);
           }
         }
       });
       
       // Filter QRPay data
-      const filtered = qrpayData.filter(record => {
-        const userName = record['User Name']?.toString().trim();
-        const date = extractDate(record['Date/Time']?.toString() || '');
-        
-        if (!userName || !date) return false;
-        
-        const key = `${userName}|${date}`;
-        return !bonusSet.has(key);
-      });
+      const filtered = qrpayData
+        .filter(record => {
+          const userName = record['User Name']?.toString().trim();
+          const date = extractDate(record['Date/Time']?.toString() || '');
+          
+          if (!userName || !date) return false;
+          
+          const key = `${userName.toLowerCase()}|${date}`;
+          return !bonusSet.has(key);
+        })
+        .map(record => ({
+          'User Name': record['User Name'],
+          'Deposit': record['Deposit'],
+          'Date/Time': record['Date/Time'],
+          'Reference': record['Reference'] || '-',
+          'Status': 'Belum Dapat Bonus'
+        }));
       
       setFilteredData(filtered);
       
       if (filtered.length === 0) {
         setError('Tidak ada data yang belum mendapatkan bonus deposit harian');
+      } else {
+        setSuccess(`Ditemukan ${filtered.length} user yang belum mendapatkan bonus`);
+        setTimeout(() => setSuccess(''), 3000);
       }
     } catch (err) {
       setError('Error saat memfilter data: ' + (err as Error).message);
@@ -108,83 +173,68 @@ export default function Home() {
     }
   };
 
+  // Download Excel
   const downloadExcel = () => {
     if (filteredData.length === 0) {
       setError('Tidak ada data untuk didownload');
       return;
     }
     
-    // Prepare data for export
-    const exportData = filteredData.map(record => ({
-      'User Name': record['User Name'],
-      'Deposit': record['Deposit'],
-      'Date/Time': record['Date/Time'],
-      'Reference': record['Reference'] || '-'
-    }));
-    
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const worksheet = XLSX.utils.json_to_sheet(filteredData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Belum Dapat Bonus');
     
     const fileName = `deposit_belum_bonus_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
+    setSuccess(`Berhasil download ${filteredData.length} data`);
+    setTimeout(() => setSuccess(''), 3000);
   };
 
-  const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    try {
-      setLoading(true);
-      const data = await readExcelFile(file);
-      setManualData(data);
-      setError('');
-    } catch (err) {
-      setError('Error membaca file manual: ' + (err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQRPayUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    try {
-      setLoading(true);
-      const data = await readExcelFile(file);
-      setQrpayData(data);
-      setError('');
-    } catch (err) {
-      setError('Error membaca file QRPay: ' + (err as Error).message);
-    } finally {
-      setLoading(false);
-    }
+  // Reset All Data
+  const resetData = () => {
+    setManualData([]);
+    setQrpayData([]);
+    setFilteredData([]);
+    setManualFileName('');
+    setQrpayFileName('');
+    setError('');
+    setSuccess('');
   };
 
   return (
-    <div className="min-h-screen p-8" style={{ background: '#f5f5f5' }}>
+    <main className="min-h-screen py-8 px-4">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-2" style={{ color: '#1f2937' }}>
-          Filter Deposit - Bonus Harian
-        </h1>
-        <p className="mb-8" style={{ color: '#4b5563' }}>
-          Menampilkan user dari QRPay yang belum mendapatkan bonus deposit harian
-        </p>
-        
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-800 mb-2">
+            Filter Deposit Bonus Harian
+          </h1>
+          <p className="text-gray-600">
+          </p>
+        </div>
+
+        {/* Alert Messages */}
         {error && (
-          <div className="mb-4 p-4 rounded" style={{ background: '#fee2e2', border: '1px solid #fecaca', color: '#dc2626' }}>
-            {error}
+          <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+            <strong>Error!</strong> {error}
           </div>
         )}
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {/* Manual Deposit Upload */}
-          <div className="rounded-lg shadow-md p-6" style={{ background: '#ffffff' }}>
-            <h2 className="text-xl font-semibold mb-4" style={{ color: '#1f2937' }}>
-              1. Deposit History (Manual)
+        {success && (
+          <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+            <strong>Success!</strong> {success}
+          </div>
+        )}
+
+        {/* Upload Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Manual Deposit */}
+          <div className="card">
+            <h2 className="text-xl font-semibold mb-4 flex items-center">
+              <span className="w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-2">1</span>
+              Deposit History (Manual)
             </h2>
-            <div className="border-2 border-dashed rounded-lg p-6 text-center" style={{ borderColor: '#d1d5db' }}>
+            <div className="upload-area" onClick={() => document.getElementById('manual-upload')?.click()}>
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -192,32 +242,38 @@ export default function Home() {
                 className="hidden"
                 id="manual-upload"
               />
-              <label
-                htmlFor="manual-upload"
-                className="cursor-pointer inline-block px-4 py-2 rounded transition"
-                style={{ background: '#2563eb', color: '#ffffff' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
-                onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
-              >
-                Upload File Manual
-              </label>
-              {manualData.length > 0 && (
-                <p className="mt-3" style={{ color: '#16a34a' }}>
-                  ✓ {manualData.length} data terupload
-                </p>
-              )}
-              <p className="text-sm mt-2" style={{ color: '#6b7280' }}>
-                Format: .xlsx, .xls
-              </p>
+              <div className="space-y-2">
+                <div className="text-4xl">📁</div>
+                <p className="text-gray-600">Klik untuk upload file manual</p>
+                <p className="text-sm text-gray-400">Format: .xlsx, .xls</p>
+                {manualFileName && (
+                  <p className="text-green-600 text-sm mt-2">
+                    ✓ {manualFileName} ({manualData.length} data)
+                  </p>
+                )}
+              </div>
             </div>
+            {manualData.length > 0 && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-600">
+                  <strong>Preview:</strong> {manualData.slice(0, 3).map((d, i) => (
+                    <span key={i} className="inline-block bg-gray-200 rounded px-2 py-1 text-xs mr-1">
+                      {d['User Name']}
+                    </span>
+                  ))}
+                  {manualData.length > 3 && `+${manualData.length - 3} lainnya`}
+                </p>
+              </div>
+            )}
           </div>
-          
-          {/* QRPay Upload */}
-          <div className="rounded-lg shadow-md p-6" style={{ background: '#ffffff' }}>
-            <h2 className="text-xl font-semibold mb-4" style={{ color: '#1f2937' }}>
-              2. Deposit History (QRPay)
+
+          {/* QRPay Deposit */}
+          <div className="card">
+            <h2 className="text-xl font-semibold mb-4 flex items-center">
+              <span className="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center mr-2">2</span>
+              Deposit History (QRPay)
             </h2>
-            <div className="border-2 border-dashed rounded-lg p-6 text-center" style={{ borderColor: '#d1d5db' }}>
+            <div className="upload-area" onClick={() => document.getElementById('qrpay-upload')?.click()}>
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -225,107 +281,110 @@ export default function Home() {
                 className="hidden"
                 id="qrpay-upload"
               />
-              <label
-                htmlFor="qrpay-upload"
-                className="cursor-pointer inline-block px-4 py-2 rounded transition"
-                style={{ background: '#2563eb', color: '#ffffff' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
-                onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
-              >
-                Upload File QRPay
-              </label>
-              {qrpayData.length > 0 && (
-                <p className="mt-3" style={{ color: '#16a34a' }}>
-                  ✓ {qrpayData.length} data terupload
-                </p>
-              )}
-              <p className="text-sm mt-2" style={{ color: '#6b7280' }}>
-                Format: .xlsx, .xls
-              </p>
+              <div className="space-y-2">
+                <div className="text-4xl">📱</div>
+                <p className="text-gray-600">Klik untuk upload file QRPay</p>
+                <p className="text-sm text-gray-400">Format: .xlsx, .xls</p>
+                {qrpayFileName && (
+                  <p className="text-green-600 text-sm mt-2">
+                    ✓ {qrpayFileName} ({qrpayData.length} data)
+                  </p>
+                )}
+              </div>
             </div>
+            {qrpayData.length > 0 && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-600">
+                  <strong>Preview:</strong> {qrpayData.slice(0, 3).map((d, i) => (
+                    <span key={i} className="inline-block bg-gray-200 rounded px-2 py-1 text-xs mr-1">
+                      {d['User Name']}
+                    </span>
+                  ))}
+                  {qrpayData.length > 3 && `+${qrpayData.length - 3} lainnya`}
+                </p>
+              </div>
+            )}
           </div>
         </div>
-        
+
         {/* Action Buttons */}
-        <div className="flex gap-4 mb-8">
-          <button
-            onClick={filterDeposits}
-            disabled={loading || manualData.length === 0 || qrpayData.length === 0}
-            className="px-6 py-2 rounded font-semibold"
-            style={{
-              background: loading || manualData.length === 0 || qrpayData.length === 0 ? '#9ca3af' : '#16a34a',
-              color: '#ffffff',
-              cursor: loading || manualData.length === 0 || qrpayData.length === 0 ? 'not-allowed' : 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              if (!(loading || manualData.length === 0 || qrpayData.length === 0)) {
-                e.currentTarget.style.background = '#15803d';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!(loading || manualData.length === 0 || qrpayData.length === 0)) {
-                e.currentTarget.style.background = '#16a34a';
-              }
-            }}
-          >
-            {loading ? 'Memproses...' : 'Filter Data'}
-          </button>
-          
-          {filteredData.length > 0 && (
+        {(manualData.length > 0 || qrpayData.length > 0) && (
+          <div className="flex gap-4 mb-8 justify-center">
             <button
-              onClick={downloadExcel}
-              className="px-6 py-2 rounded font-semibold"
-              style={{ background: '#4f46e5', color: '#ffffff' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#4338ca'}
-              onMouseLeave={(e) => e.currentTarget.style.background = '#4f46e5'}
+              onClick={filterDeposits}
+              disabled={loading || manualData.length === 0 || qrpayData.length === 0}
+              className={`btn-primary ${(loading || manualData.length === 0 || qrpayData.length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              Download Excel
+              {loading ? 'Memproses...' : '🔍 Filter Data'}
             </button>
-          )}
-        </div>
-        
+            
+            {filteredData.length > 0 && (
+              <button onClick={downloadExcel} className="btn-success">
+                📥 Download Excel
+              </button>
+            )}
+            
+            <button onClick={resetData} className="btn-danger">
+              🔄 Reset Semua
+            </button>
+          </div>
+        )}
+
+        {/* Statistics Cards */}
+        {(manualData.length > 0 || qrpayData.length > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-4 text-white">
+              <p className="text-sm opacity-90">Total Data Manual</p>
+              <p className="text-2xl font-bold">{manualData.length}</p>
+            </div>
+            <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-lg p-4 text-white">
+              <p className="text-sm opacity-90">Total Data QRPay</p>
+              <p className="text-2xl font-bold">{qrpayData.length}</p>
+            </div>
+            <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-lg p-4 text-white">
+              <p className="text-sm opacity-90">Belum Dapat Bonus</p>
+              <p className="text-2xl font-bold">{filteredData.length}</p>
+            </div>
+          </div>
+        )}
+
         {/* Results Table */}
         {filteredData.length > 0 && (
-          <div className="rounded-lg shadow-md overflow-hidden" style={{ background: '#ffffff' }}>
-            <div className="px-6 py-4 border-b" style={{ background: '#f9fafb', borderColor: '#e5e7eb' }}>
-              <h3 className="text-lg font-semibold" style={{ color: '#1f2937' }}>
-                Hasil Filter: {filteredData.length} user belum dapat bonus
+          <div className="card overflow-hidden">
+            <div className="border-b pb-4 mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">
+                Hasil Filter: User yang Belum Dapat Bonus
               </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Menampilkan {filteredData.length} dari {qrpayData.length} data QRPay
+              </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead style={{ background: '#f9fafb' }}>
+              <table className="w-full">
+                <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
-                      User Name
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
-                      Deposit
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
-                      Date/Time
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: '#6b7280' }}>
-                      Reference
-                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Deposit</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date/Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y" style={{ divideColor: '#e5e7eb' }}>
+                <tbody className="divide-y divide-gray-200">
                   {filteredData.map((record, idx) => (
                     <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
-                        {record['User Name']}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{record['User Name']}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
                         {typeof record['Deposit'] === 'number' 
                           ? `Rp ${record['Deposit'].toLocaleString('id-ID')}`
                           : record['Deposit']}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
-                        {record['Date/Time']}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: '#111827' }}>
-                        {record['Reference'] || '-'}
+                      <td className="px-4 py-3 text-sm text-gray-600">{record['Date/Time']}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 font-mono">{record['Reference']}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                          {record['Status']}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -334,18 +393,36 @@ export default function Home() {
             </div>
           </div>
         )}
-        
-        {/* Info Panel */}
-        <div className="mt-8 p-4 rounded-lg" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-          <h4 className="font-semibold mb-2" style={{ color: '#1e40af' }}>Informasi Filter:</h4>
-          <ul className="text-sm space-y-1" style={{ color: '#1e3a8a' }}>
-            <li>• Data Manual dengan kolom "To Bank" mengandung "BONUS DEPOSIT HARIAN" dianggap sudah mendapatkan bonus</li>
-            <li>• Perbandingan dilakukan berdasarkan User Name dan Tanggal yang sama</li>
-            <li>• Hanya menampilkan data QRPay yang belum mendapatkan bonus di tanggal yang sama</li>
-            <li>• Mendukung file Excel (.xlsx, .xls)</li>
-          </ul>
+
+        {/* Information Panel */}
+        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <h4 className="font-semibold text-blue-800 mb-3 flex items-center">
+            <span className="text-xl mr-2">ℹ️</span>
+            Informasi Filter
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-700">
+            <div>
+              <ul className="space-y-2">
+                <li>✓ Data Manual dengan kolom <strong>"To Bank"</strong> mengandung <strong>"BONUS DEPOSIT HARIAN"</strong> dianggap sudah mendapatkan bonus</li>
+                <li>✓ Perbandingan dilakukan berdasarkan <strong>User Name</strong> dan <strong>Tanggal</strong> yang sama</li>
+                <li>✓ Hanya menampilkan data QRPay yang belum mendapatkan bonus di tanggal yang sama</li>
+              </ul>
+            </div>
+            <div>
+              <ul className="space-y-2">
+                <li>📊 Mendukung file Excel (.xlsx, .xls)</li>
+                <li>⚡ Optimasi untuk data besar (1000+ records)</li>
+                <li>📥 Hasil filter bisa didownload dalam format Excel</li>
+              </ul>
+            </div>
+          </div>
         </div>
+
+        {/* Footer */}
+        <footer className="mt-8 text-center text-sm text-gray-500 border-t pt-6">
+          <p>SCB Deposit Filter © {new Date().getFullYear()} - Filter data deposit untuk bonus harian</p>
+        </footer>
       </div>
-    </div>
+    </main>
   );
 }
