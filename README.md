@@ -1,15 +1,33 @@
-# Deposit Filter App
+# SCB Deposit Filter
 
-Aplikasi untuk memfilter data deposit dari dua sumber (Manual dan QRPay) untuk menampilkan user yang belum mendapatkan bonus deposit harian.
+Aplikasi web untuk memfilter data deposit dari dua sumber (Manual dan QRPay) untuk menampilkan user yang belum mendapatkan bonus deposit harian.
 
-## Fitur
-- Upload file Excel/CSV untuk Deposit History Manual
-- Upload file Excel/CSV untuk Deposit History QRPay
-- Filter otomatis berdasarkan aturan yang ditentukan
+## 🚀 Fitur
+
+- Upload file Excel untuk Deposit History Manual
+- Upload file Excel untuk Deposit History QRPay
+- Filter otomatis berdasarkan User Name dan Tanggal
 - Download hasil filter dalam format Excel
+- Responsive design dengan Tailwind CSS
+- Optimasi untuk data besar (1000+ records)
 
-## Cara Menggunakan
-1. Upload file Deposit History Manual (dengan kolom: User Name, From Bank, To Bank, Deposit, Date/Time, Edited By)
-2. Upload file Deposit History QRPay
-3. Klik tombol "Filter Data"
-4. Hasil filter akan ditampilkan dan bisa didownload dalam format Excel
+## 📋 Prasyarat
+
+- Node.js 18+ atau lebih tinggi
+- Akun GitHub (untuk upload)
+- Akun Vercel (untuk deploy)
+
+## 🛠️ Instalasi Lokal
+
+```bash
+# Clone repository
+git clone https://github.com/username-anda/scb-deposit-filter.git
+
+# Masuk ke folder
+cd scb-deposit-filter
+
+# Install dependencies
+npm install
+
+# Jalankan development server
+npm run dev
